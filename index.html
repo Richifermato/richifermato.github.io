@@ -1,5 +1,211 @@
 <!doctype html>
 <html lang="cs">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Richard Karásek</title></head>
-<body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0"><h1>Richard Karásek — web se připravuje</h1></body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Had · richardkarasek.fun</title>
+<meta name="description" content="Jednoduchá hra Had v prohlížeči. Šipky nebo swipe, sbírej jablka a nenaraz.">
+<style>
+  :root {
+    --bg: #0f1a14; --panel: #16241c; --grid: #1b2c22; --text: #e8f0e9; --muted: #8fa596;
+    --snake: #7bd88f; --head: #b6f5c1; --food: #ff6b5b; --accent: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px; min-height: 100dvh; touch-action: manipulation;
+  }
+  header { width: 100%; max-width: 480px; display: flex; justify-content: space-between; align-items: baseline; }
+  h1 { font-size: 1.4rem; margin: 0 0 8px; letter-spacing: .02em; }
+  .scores { display: flex; gap: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .scores b { color: var(--text); }
+  .board { position: relative; width: 100%; max-width: 480px; aspect-ratio: 1; }
+  canvas { width: 100%; height: 100%; display: block; background: var(--panel); border-radius: 12px; touch-action: none; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; background: rgba(15, 26, 20, .82); border-radius: 12px; text-align: center; padding: 16px;
+  }
+  .overlay[hidden] { display: none; }
+  .overlay h2 { margin: 0; font-size: 1.6rem; }
+  .overlay p { margin: 0; color: var(--muted); }
+  button {
+    font: inherit; font-weight: 600; color: var(--bg); background: var(--snake);
+    border: 0; border-radius: 10px; padding: 12px 24px; cursor: pointer;
+  }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .pad { display: grid; grid-template-columns: repeat(3, 64px); gap: 8px; margin-top: 16px; }
+  .pad button { padding: 0; height: 56px; background: var(--grid); color: var(--text); font-size: 1.4rem; }
+  .pad .up { grid-column: 2; } .pad .left { grid-column: 1; grid-row: 2; }
+  .pad .down { grid-column: 2; grid-row: 2; } .pad .right { grid-column: 3; grid-row: 2; }
+  .hint { color: var(--muted); font-size: .9rem; margin-top: 12px; text-align: center; }
+  @media (hover: hover) and (pointer: fine) { .pad { display: none; } }
+  footer { margin-top: auto; padding-top: 24px; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Had</h1>
+  <div class="scores">
+    <span>Skóre <b id="score">0</b></span>
+    <span>Rekord <b id="best">0</b></span>
+  </div>
+</header>
+
+<div class="board">
+  <canvas id="game" width="480" height="480" aria-label="Herní plocha"></canvas>
+  <div class="overlay" id="overlay">
+    <h2 id="ovTitle">Had</h2>
+    <p id="ovText">Sbírej jablka a nenaraz do zdi ani do sebe.</p>
+    <button id="startBtn">Hrát</button>
+  </div>
+</div>
+
+<div class="pad" aria-label="Ovládání">
+  <button class="up" data-dir="up" aria-label="Nahoru">▲</button>
+  <button class="left" data-dir="left" aria-label="Doleva">◀</button>
+  <button class="down" data-dir="down" aria-label="Dolů">▼</button>
+  <button class="right" data-dir="right" aria-label="Doprava">▶</button>
+</div>
+<p class="hint">Šipky nebo WASD · mezerník = pauza · na mobilu swipe</p>
+
+<footer>richardkarasek.fun</footer>
+
+<script>
+(() => {
+  const N = 20;                       // políček na stranu
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const C = canvas.width / N;
+  const $ = id => document.getElementById(id);
+  const overlay = $('overlay'), ovTitle = $('ovTitle'), ovText = $('ovText'), startBtn = $('startBtn');
+  const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+  // Měření: zatím jen připravené. Po napojení GA4 + souhlasu z lišty se volá gtag.
+  const track = (name, params) => { if (typeof window.gtag === 'function') window.gtag('event', name, params); };
+
+  let best = 0;
+  try { best = +localStorage.getItem('had-best') || 0; } catch (e) {}
+  $('best').textContent = best;
+
+  let snake, dir, queue, food, score, speed, timer, state = 'menu';
+
+  function reset() {
+    snake = [[9, 10], [8, 10], [7, 10]];
+    dir = 'right'; queue = []; score = 0; speed = 130;
+    $('score').textContent = 0;
+    placeFood();
+  }
+
+  function placeFood() {
+    do { food = [Math.floor(Math.random() * N), Math.floor(Math.random() * N)]; }
+    while (snake.some(([x, y]) => x === food[0] && y === food[1]));
+  }
+
+  function start() {
+    reset(); state = 'run'; overlay.hidden = true;
+    track('game_start');
+    loop();
+  }
+
+  function loop() {
+    clearTimeout(timer);
+    if (state !== 'run') return;
+    step(); draw();
+    timer = setTimeout(loop, speed);
+  }
+
+  function step() {
+    if (queue.length) dir = queue.shift();
+    const [dx, dy] = DIRS[dir];
+    const head = [snake[0][0] + dx, snake[0][1] + dy];
+    const hitWall = head[0] < 0 || head[1] < 0 || head[0] >= N || head[1] >= N;
+    const ate = head[0] === food[0] && head[1] === food[1];
+    const body = ate ? snake : snake.slice(0, -1);
+    if (hitWall || body.some(([x, y]) => x === head[0] && y === head[1])) return gameOver();
+    snake.unshift(head);
+    if (ate) {
+      score++; $('score').textContent = score;
+      speed = Math.max(60, 130 - score * 3);
+      placeFood();
+    } else snake.pop();
+  }
+
+  function gameOver() {
+    state = 'over';
+    const record = score > best;
+    if (record) {
+      best = score; $('best').textContent = best;
+      try { localStorage.setItem('had-best', best); } catch (e) {}
+    }
+    track('game_over', { score, new_record: record });
+    showOverlay(record ? 'Nový rekord!' : 'Konec hry', `Skóre: ${score}`, 'Hrát znovu');
+  }
+
+  function showOverlay(t, p, b) {
+    ovTitle.textContent = t; ovText.textContent = p; startBtn.textContent = b;
+    overlay.hidden = false; startBtn.focus();
+  }
+
+  function togglePause() {
+    if (state === 'run') { state = 'pause'; clearTimeout(timer); showOverlay('Pauza', `Skóre: ${score}`, 'Pokračovat'); }
+    else if (state === 'pause') { state = 'run'; overlay.hidden = true; loop(); }
+  }
+
+  function turn(d) {
+    if (state !== 'run') return;
+    const last = queue.length ? queue[queue.length - 1] : dir;
+    const [lx, ly] = DIRS[last], [nx, ny] = DIRS[d];
+    if (lx + nx === 0 && ly + ny === 0) return;   // nejde se otočit do sebe
+    if (d !== last && queue.length < 2) queue.push(d);
+  }
+
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+
+  function draw() {
+    const css = getComputedStyle(document.documentElement);
+    ctx.fillStyle = css.getPropertyValue('--panel'); ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = css.getPropertyValue('--grid');
+    for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) if ((x + y) % 2) ctx.fillRect(x * C, y * C, C, C);
+    // jablko
+    ctx.fillStyle = css.getPropertyValue('--food');
+    ctx.beginPath(); ctx.arc(food[0] * C + C / 2, food[1] * C + C / 2, C * 0.38, 0, Math.PI * 2); ctx.fill();
+    // had
+    snake.forEach(([x, y], i) => {
+      ctx.fillStyle = css.getPropertyValue(i ? '--snake' : '--head');
+      rr(x * C + 1, y * C + 1, C - 2, C - 2, C * 0.3);
+    });
+  }
+
+  // Ovládání: klávesnice
+  const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' };
+  document.addEventListener('keydown', e => {
+    const d = KEYS[e.key] || KEYS[e.key.toLowerCase?.()];
+    if (d) { e.preventDefault(); turn(d); }
+    else if (e.key === ' ') { e.preventDefault(); if (state === 'run' || state === 'pause') togglePause(); else start(); }
+  });
+
+  // Ovládání: tlačítka
+  document.querySelectorAll('.pad button').forEach(b =>
+    b.addEventListener('pointerdown', e => { e.preventDefault(); turn(b.dataset.dir); }));
+
+  // Ovládání: swipe
+  let sx = 0, sy = 0;
+  canvas.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  canvas.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+  });
+
+  startBtn.addEventListener('click', () => state === 'pause' ? togglePause() : start());
+  document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'run') togglePause(); });
+
+  reset(); draw();
+})();
+</script>
+</body>
 </html>
