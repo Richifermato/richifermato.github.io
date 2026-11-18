@@ -55,6 +55,11 @@
   .cb p { margin: 0 0 12px; color: var(--muted); font-size: .9rem; }
   .cb .row { display: flex; gap: 8px; }
   .cb .row button { flex: 1; }
+  .cb .more { display: block; margin: 10px auto 0; }
+  .cb .opt { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--grid); font-size: .9rem; }
+  .cb .opt input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--snake); flex: none; }
+  .cb .opt span { color: var(--muted); display: block; }
+  .cb .opt:last-of-type { margin-bottom: 12px; }
 </style>
 </head>
 <body>
@@ -97,6 +102,14 @@
   <div class="row">
     <button id="cbNo">Nesouhlasím</button>
     <button id="cbYes">Souhlasím</button>
+  </div>
+  <button class="linkbtn more" id="cbMore" aria-expanded="false">Vybrat podrobně</button>
+  <div id="cbPanel" hidden>
+    <label class="opt"><input type="checkbox" checked disabled>
+      <div><b>Nezbytné</b> · vždy zapnuté<span>Uložení rekordu ve hře a této volby. Zůstává jen v tvém prohlížeči.</span></div></label>
+    <label class="opt"><input type="checkbox" id="cbAnalytics">
+      <div><b>Analytické</b> · Google Analytics<span>Anonymní statistika: kolik lidí hraje, jak dlouho a odkud přišli. Bez reklam.</span></div></label>
+    <div class="row"><button id="cbSave">Uložit výběr</button></div>
   </div>
 </div>
 
@@ -145,7 +158,11 @@
 
   document.getElementById('cbYes').onclick = () => choose('yes');
   document.getElementById('cbNo').onclick = () => choose('no');
-  document.getElementById('cbOpen').onclick = () => { cb.hidden = false; };
+  const panel = document.getElementById('cbPanel'), more = document.getElementById('cbMore');
+  const box = document.getElementById('cbAnalytics');
+  more.onclick = () => { panel.hidden = !panel.hidden; more.setAttribute('aria-expanded', !panel.hidden); };
+  document.getElementById('cbSave').onclick = () => choose(box.checked ? 'yes' : 'no');
+  document.getElementById('cbOpen').onclick = () => { box.checked = read() === 'yes'; cb.hidden = false; };
 
   const c = read();
   if (c === 'yes') loadGA(); else if (c === null) cb.hidden = false;
